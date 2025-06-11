@@ -6,8 +6,8 @@ import pathlib
 #import tabula as tb
 from openpyxl import load_workbook, Workbook
 import win32com.client as win32
-##Made by Anthony Mikinka
-##Revised by Michelle Ahmed & Kyle Breen-Bondie
+##Authors: Anthony Mikinka & Kyle Breen-Bondie
+##Revised by Michelle Ahmed 
 ##Version .4
 
 
