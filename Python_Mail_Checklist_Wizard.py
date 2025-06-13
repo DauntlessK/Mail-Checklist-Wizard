@@ -1,14 +1,16 @@
+import sys
 import openpyxl, os
 import win32print
 import pandas as pd
 import numpy as np
 import pathlib
+import re
 #import tabula as tb
 from openpyxl import load_workbook, Workbook
 import win32com.client as win32
 ##Authors: Anthony Mikinka & Kyle Breen-Bondie
 ##Revised by Michelle Ahmed 
-##Version .4
+##Version .41
 
 
 ############ Extracting Data from Job Ticket PDF ############ 
@@ -29,7 +31,7 @@ import win32com.client as win32
 MARKUP_PERCENT = 0.03
 files_to_upload = True
 upload_num = 0
-ALLOWABLE_MAILING_CLASSES = [
+ALLOWABLE_MAILING_CLASSES = [       #List of mailing classes that can be entered, otherwise you cannot progress
     'Presort Standard',
     'Presort Standard Stamp',
     'Presort First Class',
@@ -39,15 +41,16 @@ ALLOWABLE_MAILING_CLASSES = [
     'Non Profit Stamp',
     'Non Profit',
     'Peridocal',
-    'DP'
+    'DP',
+    'Meter'
 ]
-EXPECTED_UPLOAD_COLUMNS = [
+EXPECTED_UPLOAD_COLUMNS = [         #Column names (exactly) that python is expecting within the upload xlsx file. In that order.
     'Brea',
     'Full Name',
     'Business',
     'Address Line 1',
     'Address Line 2',
-    'City State ZIP Code',
+    'City State Zip Code',
     'IM Barcode',
     'Numeric IM barcode',
     'Endorsement Line',
@@ -55,28 +58,36 @@ EXPECTED_UPLOAD_COLUMNS = [
 ]
 filename_array = []     #contains a list of all file names in the current upload
 job_info_array = []     #contains a list of all job info in current upload (filename - extension)
-job_num_array = []      #contains a list of all job numbers in current upload
 permit_num_array = []   #contains a list of permit nums - needed? -> only 1 permit num?
-postage_array = []
+total_qty_array = []    #contains a list of all quantities
+postage_array = []      #contains a list of all postage costs
+undeliverables = False
 client = ""
 print("------ Python Mail Checklist Wizard ------")
+client = input("Input client name: ")
 
 #loop for each file
 while files_to_upload:
     filename = input("Input file data name: ")
+    if "Undeliverables" in filename:
+        undeliverables = True
     job_info =  filename
     filename = filename + ".xlsx"
     filename_array.append(filename)
     job_info_array.append(job_info)
-    job_num = input("Input job number: ")
+    job_num = re.search(r'^(\d+)\s', filename)
+    if job_num:
+        job_num = job_num.group(1)
+    else:
+        print("Error getting job number from file name.")
     permit_num = input("Input Permit number: ")
-    client = input("Input client name: ")
-
-    postage = input("Input postage cost: ")
+    permit_num_array.append(permit_num)
+    postage = input("Input postage cost: $")
 
     ############ Input and Verify Mailing Class ############
     mailing_class_is_invalid = True
     while mailing_class_is_invalid:
+        mailing_class = ""
         mailing_class = input("Input the mailing class: ")
         mail_class_txt = 'Mail Class: '
         mail_class = mail_class_txt + mailing_class
@@ -84,12 +95,16 @@ while files_to_upload:
             if mailing_class == x:
                 mailing_class_is_invalid = False
                 break
-            else:
-                print("Error- input mailing class does not match allowable mailing classes. You entered: " + mailing_class)
-                print("Allowable mailing classes: ", end = "")
-                print(ALLOWABLE_MAILING_CLASSES)
+        if mailing_class_is_invalid:
+            print("Error- input mailing class does not match allowable mailing classes. You entered: " + mailing_class)
+            print("Allowable mailing classes: ", end = "")
+            print(ALLOWABLE_MAILING_CLASSES)
 
-    data = pd.read_excel(filename_array[upload_num]) #loading excel file into pandas
+    try: 
+        data = pd.read_excel(filename_array[upload_num]) #loading excel file into pandas
+    except:
+        print("ERROR - Likely the wizard was not able to find the file in the current folder.")
+        sys.exit()
     #data.to_excel(filename_array[upload_num] + ' original.xlsx')    #save original file
     print(data.head())
 
@@ -110,15 +125,22 @@ while files_to_upload:
             print("Error with column " + str(x))
             print("Expected: " + EXPECTED_UPLOAD_COLUMNS[x])
             print("Upload: " + data.columns[x])
+            print("Terminating program- Adjust upload file and run program again.")
+            sys.exit()
 
     total_qty = data['Sort Position'].max() #gets the tota195441 DZS_Intl - Copyl amt of rows in Sort Position column
     print("Total Qty: ", end ="")
     print(total_qty)
+    total_qty_array.append(total_qty)
 
     mid_rec = int((total_qty-1) / 2) #middle record in the data file, divides by 2, subtracts 1
 
+    #### Job Number ####
+    print("Job Number: ", end ="")
+    print(job_num)
+
     #### Job File Name ####
-    print("File name: ", end ="")
+    print("Job Name: ", end ="")
     print(job_info_array[upload_num])
 
     #### Job Permit Number ####
@@ -160,12 +182,12 @@ while files_to_upload:
     if permit_num=='95':
         mrkdup_postage = (MARKUP_PERCENT * float(total_qty))# + postage
         new_postage = float(postage) + mrkdup_postage
-        print(f"The new marked up postage is: {new_postage}")
+        print(f"The new marked up postage is: ${new_postage}")
 
     elif permit_num=='462':
         mrkdup_postage = (MARKUP_PERCENT * float(total_qty))# + postage
         new_postage = float(postage) + mrkdup_postage
-        print(f"The new marked up postage is: {new_postage}")
+        print(f"The new marked up postage is: ${new_postage}")
 
     elif permit_num=='NA':
         new_postage = postage
@@ -176,7 +198,7 @@ while files_to_upload:
     elif permit_num=='DP':
         mrkdup_postage = (MARKUP_PERCENT * float(total_qty))# + postage
         new_postage = float(postage) + mrkdup_postage
-        print(f"The new marked up postage is: {new_postage}")
+        print(f"The new marked up postage is: ${new_postage}")
     else:
         new_postage = postage
 
@@ -184,27 +206,36 @@ while files_to_upload:
 
     ############ Variables ############
     variables_array = []
-    for x in len(20): #checks for up to 20 variables
-        if chklst_sheet['K1'].isna():
-            print("column i")
-
+    for x in data.columns:
+        if x in EXPECTED_UPLOAD_COLUMNS:
+            continue                    #The current column is a standard upload column, check next
+        else:
+            variables_array.append(x)   #The current column is not a standard upload column, and also not blank
+    if len(variables_array) > 0:
+        print("Variables detected: ", end = "")
+        print(variables_array)
 
     ############ Checklist Creation (openpyxl)############
     chklst = load_workbook('Checklist-Template.xlsx')
     chklst_sheet = chklst.active
 
-    chklst_sheet['C1'] = job_info_array[upload_num] #Job Info Name + Number
-    chklst_sheet['P1'] = total_qty #total amt of records 
-    chklst_sheet['J15'] = permit_num #job permit number
-    chklst_sheet['L15'] = mail_class #mailing class
-    chklst_sheet['N22'] = lr_name #last record name
-    chklst_sheet['J22'] = fr_name #first record name 
-    chklst_sheet['C16'] = veri_rec_name #full name for verification record
-    chklst_sheet['C18'] = veri_rec_biz #business for verification record
-    chklst_sheet['C19'] = veri_rec_addr1 #address line 1 for verification record
-    chklst_sheet['C20'] = veri_rec_addr2 #address line 2 for verification record
-    chklst_sheet['C21'] = veri_rec_csz #city state zip code for verification record
-    #chklst_sheet['D24'] = veri_rec_srt_tray_bun #sort, tray bundle for verification record
+    chklst_sheet['C1'] = job_info_array[upload_num]             #Job Info Name + Number
+    chklst_sheet['P1'] = total_qty                              #total amt of records 
+    chklst_sheet['J15'] = permit_num                            #job permit number
+    chklst_sheet['L15'] = mail_class                            #mailing class
+    chklst_sheet['N22'] = lr_name                               #last record name
+    chklst_sheet['J22'] = fr_name                               #first record name 
+    chklst_sheet['C16'] = veri_rec_name                         #full name for verification record
+    chklst_sheet['C18'] = veri_rec_biz                          #business for verification record
+    chklst_sheet['C19'] = veri_rec_addr1                        #address line 1 for verification record
+    chklst_sheet['C20'] = veri_rec_addr2                        #address line 2 for verification record
+    chklst_sheet['C21'] = veri_rec_csz                          #city state zip code for verification record
+    #chklst_sheet['D24'] = veri_rec_srt_tray_bun                #sort, tray bundle for verification record
+    chklst_variable_cells = ['E29', 'E30', 'E31', 'E32', 'E33', 'E34', 'E35', 'E36', 'E37'] #list of all cells that CAN contain variable fields
+    for x in range(len(variables_array)):
+        if x > 9:
+            break           #Will automatically stop on the 10th variable field, since there are only 9 possible variable fields available
+        chklst_sheet[chklst_variable_cells[x]] = variables_array[x]
 
 
     if permit_num=='95':
@@ -357,35 +388,6 @@ while files_to_upload:
     m4_bun_num = fi_sheet.cell(row=m4_row, column=11)
     m5_bun_num = fi_sheet.cell(row=m5_row, column=11)
 
-    m1_bun_num.value = 'P'
-    m2_bun_num.value = 'P'
-    m3_bun_num.value = 'P'
-    m4_bun_num.value = 'P'
-    m5_bun_num.value = 'P'
-
-    m1_tray_num = fi_sheet.cell(row=m1_row, column=12)
-    m2_tray_num = fi_sheet.cell(row=m2_row, column=12)
-    m3_tray_num = fi_sheet.cell(row=m3_row, column=12)
-    m4_tray_num = fi_sheet.cell(row=m4_row, column=12)
-    m5_tray_num = fi_sheet.cell(row=m5_row, column=12)
-
-    m1_tray_num.value = 'T'
-    m2_tray_num.value = 'T'
-    m3_tray_num.value = 'T'
-    m4_tray_num.value = 'T'
-    m5_tray_num.value = 'T'
-
-    m1_pal_num = fi_sheet.cell(row=m1_row, column=13)
-    m2_pal_num = fi_sheet.cell(row=m2_row, column=13)
-    m3_pal_num = fi_sheet.cell(row=m3_row, column=13)
-    m4_pal_num = fi_sheet.cell(row=m4_row, column=13)
-    m5_pal_num = fi_sheet.cell(row=m5_row, column=13)
-
-    m1_pal_num.value = '0'
-    m2_pal_num.value = '0'
-    m3_pal_num.value = '0'
-    m4_pal_num.value = '0'
-    m5_pal_num.value = '0'
 
     fi_data.save(filename_array[upload_num])
 
@@ -406,36 +408,26 @@ os.getcwd()
 # construct the email item object
 mailItem = olApp.CreateItem(0)
 
-#create subject line
-subject_line = ""
-for x in job_info_array:
-    subject_line = subject_line + " "
-
-
-mailItem.Subject = job_info # subject is job_info
+mailItem.Subject = job_info_array[0] # subject is job_info
 mailItem.BodyFormat = 1
 
-#email_body = ""
-#for x in job_info_array:
-
-if permit_num=='95':
-    mailItem.Body = '''Hi, 
-
-Attached is the Undeliverables and the Postage Request.
-
-QTY ''' + str(total_qty) + ''' – Postage $''' + str(new_postage)+''' – Client '''+ client
-elif permit_num=='462':
-    mailItem.Body = '''Hi,
-
-Attached is the Undeliverables and the Postage Request.
-
-QTY ''' + str(total_qty) + ''' - Postage $''' + str(new_postage)+''' - Client ''' + client
+attached_text = ""
+if permit_num_array[0] == '95' or permit_num_array[0] == '462':
+    attached_text = "Attached is the Undeliverables and the Postage Request."
 else:
-    mailItem.Body = '''Hi, 
+    attached_text = "Attached is the Undeliverables and the Presort Report."
 
-Attached is the Undeliverables and the Presort Report.
+email_body = f'''Hi,
 
-QTY ''' + str(total_qty) + ''' – Postage $''' + str(new_postage)+''' – Client ''' + client
+{attached_text}
+
+QTY {total_qty_array[0]} – Postage ${postage_array[0]} – Client {client}
+'''
+
+for x in range(upload_num > 0):          #first upload is count zero, so anything beyond zero indicates multiple uploads
+    email_body = email_body + f'''QTY {total_qty_array[1]} – Postage ${postage_array[1]} – Client {client}'''
+
+mailItem.Body = email_body
 
 
 presort_report = job_num + ' PresortReports.pdf'
